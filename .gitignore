@@ -3,3 +3,12 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+hardware/_autosave*
+hardware/#auto_saved_files#
+_autosave*
+*-bak
+*-backups
+hardware/fp-info-cache
+hardware/PhaseLatchMini/fp-info-cache
+hardware/PhaseLatchMini/production/backups
+.DS_Store

@@ -1,36 +1,85 @@
-# STM32F103 Dual-ADC IQ USB Streamer
+# PhaseLatch Mini – STM32F103 Dual-ADC IQ USB Streamer
 
-High-rate continuous streaming of interleaved dual ADC (I/Q) samples over USB Full‑Speed (FS) using only the built‑in CDC class (no custom driver) on an STM32F103C8 ("Blue Pill" style) board. Companion Python host tools provide live visualization, FIFO bridging to SDR applications (e.g. GQRX / GNU Radio), raw capture, diagnostics, and throughput benchmarking.
+> Combined hardware + firmware + host tooling for a compact dual‑ADC I/Q capture platform.
 
-> Status: Actively optimized. Current validated complex sample rate: **~166.667 kI/Q samples/sec** (TIM3 driven) with sustained USB payload throughput >500 KiB/s (≈85% of theoretical CDC 64‑byte bulk efficiency). Recent firmware changes added ISR burst chaining and DMA IRQ "kick" to reduce inter-packet idle; post‑kick benchmark re‑measurement pending.
+## Overview
 
-> Origin / Intended Use: Initially developed as a lightweight streaming engine for the [PhaseLoom](https://github.com/AndersBNielsen/PhaseLoom) project, but fully usable with any dual (I/Q) analog front end producing baseband signals on two STM32F1 ADC channels. Swap or adapt the front-end conditioning (filters, biasing) and reuse the same transport & host tooling.
+High-rate continuous streaming of interleaved dual ADC (I/Q) samples over USB Full‑Speed (FS) using only the built‑in CDC class on an STM32F103C8 ("Blue Pill" style) board. Companion Python host tools provide live visualization, FIFO bridging, raw capture, diagnostics, and throughput benchmarking.
 
----
-## Hardware Overview
+> Status: Actively optimized. Current configured complex sample rate target: **220 k I/Q samples/sec** (`IQ_SAMPLE_RATE_HZ` = 220000) with sustained USB payload throughput >500 KiB/s. Timer PSC/ARR are selected at runtime by a search routine for the closest achievable rate; observed effective rate is within a small delta of the target. ADC sampling time was reduced (now `ADC_SAMPLETIME_28CYCLES_5`) to reach this rate while maintaining conversion stability.
 
-- MCU: STM32F103C8 @ 72 MHz (HSE 8 MHz ×9 PLL)
-- ADCs: ADC1 (master) + ADC2 (slave) in *dual regular simultaneous* mode
-- Trigger Source: TIM3 Update → TRGO
-- USB: Full-Speed (12 Mbps) CDC ACM (64‑byte bulk IN endpoint)
-- Inputs: Two analog channels (default PA0 → I, PA1 → Q)
-- LED: On-board user LED used for heartbeat/fallback diagnostics
-- Power: Via USB (ensure stable 5V and board has 3V3 regulator in spec)
-
-### Analog Front-End Notes
-Provide anti-alias filtering / level shifting as required. Inputs should remain within 0–3.3 V. For differential or RF baseband sources, use buffering + bias network so the ADC sees midscale (~1.65V) plus small AC swing.
+> Origin / Intended Use: Initially developed as a lightweight streaming engine for the [PhaseLoom](https://github.com/AndersBNielsen/PhaseLoom) project, but fully usable with any dual (I/Q) analog front end producing baseband signals on two STM32F1 ADC channels.
 
 ---
-## Feature Summary
+## Hardware: PhaseLatch Mini
+A 4‑layer purple PCB (Blue Pill footprint inspired) integrating two SMA input ports and on‑board ~100 kHz low‑pass filtering (~200 kHz complex baseband bandwidth). Designed around the STM32F103C8 in dual regular simultaneous ADC mode (ADC1 + ADC2) to stream interleaved I/Q samples over USB Full-Speed.
 
-- Dual ADC synchronous sampling packed as 32-bit little-endian words (I 12-bit + Q 12-bit within 2×16 containers)
+### Key Features
+- MCU: STM32F103C8 (72 MHz) LQFP‑48
+- Dual simultaneous ADC (12‑bit each) packed into 32‑bit words (I lower 12 bits, Q upper 12 bits)
+- 2 × edge‑mount SMA (J20 = I_IN, J21 = Q_IN)
+- Integrated passive input filtering (inductor + capacitor network targeting ~100 kHz LPF per channel)
+- USB‑C connector (USB2.0 FS, CDC class currently; raw/bulk class option planned)
+- On‑board 8 MHz + 32.768 kHz crystals for stable system and RTC timing
+- Ferrite bead + local bulk/decoupling for cleaner ADC rails
+- Unused GPIOs forced to analog mode early for noise reduction (see `Quiet_Unused_Pins` in `main.c`)
+- Headers for expansion / SWD / boot configuration
+
+### Production Assets
+All fabrication outputs live in `hardware/PhaseLatchMini/production`:
+- `PhaseLatchMini.zip` – Gerber/drill bundle ready for PCB fab
+- `bom.csv` – Bill of Materials (with LCSC part numbers for quick JLCPCB sourcing)
+- `designators.csv` – Component reference list
+- `positions.csv` – Pick‑and‑place XY + rotation for SMT assembly
+- `netlist.ipc` – IPC netlist export
+
+Direct link (relative): `hardware/PhaseLatchMini/production/PhaseLatchMini.zip`
+
+### BOM Highlights
+Representative components (from `bom.csv`):
+- Decoupling: multiple 100 nF 0402 caps (C307331) near MCU and filter sections
+- Filter / bulk caps: 22 nF, 220 nF, 470 nF mix shaping input response
+- Inductors: six 10 µH (0805) parts forming LC sections for each channel’s low‑pass filtering / supply isolation
+- USB-C receptacle: 16‑pin (HCTL HC-TYPE-C-16P-01A) with 5k1 CC resistors for proper orientation detection
+- Ferrite bead (FB1) for USB / supply noise suppression
+- Voltage regulator: MIC5504-3.3 (SOT‑23‑5) providing clean 3V3
+- Crystals: 8 MHz main, 32.768 kHz low‑speed (RTC / optional precise timing)
+- SMA edge connectors: matched pair for I and Q inputs
+
+### Assembly Notes
+- Clean flux residues near high‑impedance analog nodes (C1/C8 cluster) to keep leakage low.
+- If performing hand assembly, solder the SMA edge connectors first to anchor board alignment, then USB, then fine‑pitch MCU.
+
+### Filter Tuning
+Current passive network targets ~100 kHz corner. For alternative bandwidths:
+- Raise corner: decrease shunt capacitance (e.g., swap 470 nF → 220 nF or 22 nF depending on desired slope) or reduce inductance value.
+- Lower corner: increase shunt capacitance or employ higher inductance (space permitting). Recalculate fc ≈ 1/(2π√(L·C_eq)).
+- Mitigate source‑resistor induced tilt: include its resistance in design equations; keep initial shunt capacitors modest (≤10 nF) if a 50 Ω series is retained upstream.
+
+## Firmware
+
+- Dual ADC synchronous sampling packed as 32-bit little-endian words (I 12-bit + Q 12-bit inside two 16-bit lanes)
+- Target sample rate `IQ_SAMPLE_RATE_HZ` (currently 220000) with dynamic TIM3 prescaler/period search (see `timer_trigger_init()` in `iq_adc.c`)
+- ADC sampling time set to `ADC_SAMPLETIME_28CYCLES_5` for higher throughput (previous higher value limited rate)
 - Circular DMA with half / full transfer interrupts
-- Lock-free ring queue of DMA segments feeding USB transmit path
-- ISR burst chaining (up to 12 chained 64-byte packets per IN completion) to minimize USB microframe idle gaps
-- Immediate DMA IRQ packet scheduling ("kick") to prime first packet of each buffer region
+- Lock-free ring queue feeding USB transmit path
+- ISR burst chaining (current chain limit 16 packets per IN completion) to minimize USB idle gaps
+- Immediate DMA IRQ packet scheduling ("kick") to prime first packet of each half-buffer
 - Optional diagnostic/stat packets suppressed in throughput builds
-- Host tools for: diagnostics, throughput, raw capture, live ASCII / sparkline IQ view, FIFO → GQRX bridge, flexible capture & replay
-- Simple text command channel over CDC (START/STOP, A=ADCSTAT, F=FEED, legacy STATS)
+- Host tools for diagnostics, throughput, raw capture, FIFO bridging, live view
+
+### Changing the Sample Rate
+1. Edit `Inc/iq_adc.h` and set `#define IQ_SAMPLE_RATE_HZ <desired_rate>` (I/Q pairs per second).
+2. Ensure the new rate is feasible: TIM3 must be able to realize it given 16-bit ARR and prescaler; the search code picks the closest achievable value.
+3. If pushing higher rates:
+   - Consider reducing ADC sampling time (`ADC_SAMPLETIME_x`) further, but watch noise/performance.
+   - Monitor USB throughput counters (`FEED` command) for increased busy skips.
+4. Rebuild and flash. Optionally measure actual achieved rate by counting `iq_dma_half_count` + `iq_dma_full_count` over a timed host interval.
+
+### Verifying Achieved Rate
+- After START, issue the `A` command periodically; note increments of half/full counts.
+- Effective samples/sec ≈ ((delta_half + delta_full) * half_buffer_samples) / time_interval.
+- Or capture a known duration with `host_test.py` and compute rows * rate.
 
 ---
 ## Repository Layout
@@ -165,26 +214,20 @@ But most host paths should just mask & center at 2048.
 ---
 ## ADC / Timing Configuration
 
-- TIM3 base clock: 1 MHz
-- TIM3 ARR: 5  → update every 6 ticks → 166,667 complex samples/sec (approx.)
-- Dual regular simultaneous mode ensures hardware-aligned I & Q capture
-- DMA buffer: Circular array of 32-bit words (size defined in `iq_adc.h`), half/full IRQ used to enqueue segments
+- Timer configuration is dynamic: `timer_trigger_init()` iterates prescaler values to find an ARR producing a rate closest to `IQ_SAMPLE_RATE_HZ`.
+- Current target: 220000 samples/sec (complex pairs). Achieved rate is printed only via manual inspection (no direct text output yet); you can instrument `(best_rate)` variable in debugger if needed.
+- ADC sampling time currently `ADC_SAMPLETIME_28CYCLES_5`; lowering further increases throughput but may degrade SNR and settling for higher source impedances.
 
 Potential Adjustments:
-- Lower ARR for higher sample rate (watch USB bandwidth + CPU overhead)
-- Consider alternate timer or prescaler to reach round-number rates (e.g. 192 kS/s)
+- Increase `IQ_SAMPLE_RATE_HZ` (watch USB bandwidth & chain limit utilization).
+- Change ADC sampling time for performance vs accuracy trade-off.
+- Raise `chain_limit` (in `usbd_conf.c`) beyond 16 if the queue frequently stalls with residual samples and main loop fallback is minimal.
 
 ---
 ## USB Transfer Strategy & Optimizations
-
-Chronological tuning steps:
-1. Eliminate high-frequency tiny diagnostic packets (switched to periodic on-demand)
-2. Ensure maximum 64-byte packet utilization (no short frames during streaming)
-3. Introduce ISR burst chaining in `HAL_PCD_DataInStageCallback` (initial chain limit 4 → raised to 12) to reduce host idle gaps
-4. Add DMA IRQ "kick" to schedule first packet immediately as half/full buffer becomes available
-5. Instrument feeder: `feed_loop_pkts`, `feed_isr_pkts`, `feed_busy_skips`, `feed_chain_max`
-
-Remaining headroom: Full-speed theoretical payload for 64B bulk can exceed 1 MB/s; current architecture leaves margin for modest sample rate increases (target 180–200 kS/s) before exploring tighter packing or vendor-specific endpoints.
+- Chain limit now 16 (see `usbd_conf.c`); README previously referenced 12—updated.
+- DMA IRQ kick ensures first packet of each half-buffer is scheduled promptly.
+- Remaining headroom: adopt packed 3-byte I12|Q12 mode (roadmap) or vendor RAW class for further rate increases.
 
 ---
 ## Instrumentation & Monitoring
@@ -221,6 +264,7 @@ Use `host_diagnostics.py stats` for legacy STAT delta interpretation, if enabled
 | `host_probe.py` | Placeholder for future probing tools |
 
 ### GQRX Integration (via FIFO)
+- Set GQRX sample rate to match `IQ_SAMPLE_RATE_HZ` (e.g. 220000) or the nearest supported value.
 1. Run FIFO bridge:
    ```
    python host_iq_fifo.py --fifo /tmp/iq.fifo --format cf32 --prebuffer 0.25
@@ -256,9 +300,9 @@ PyUSB high-rate test (when using/adding raw vendor class):
 python host_throughput.py --seconds 5 --progress
 ```
 
-Interpretation:
-- Bytes/sec ÷ 4 = complex samples/sec (given current 32-bit packing)
-- Compare chain_max vs. chain_limit (12) to see if raising provides further benefit
+Interpretation updates:
+- Bytes/sec ÷ 4 = complex samples/sec (current raw 32-bit mode).
+- For future 3-byte packed mode bytes/sec ÷ 3 will apply.
 
 ---
 ## Troubleshooting
@@ -273,15 +317,15 @@ Interpretation:
 
 ---
 ## Roadmap / Future Ideas
-
-- Increase sample rate toward 180–200 kS/s (timer & queue tuning)
-- Optional tighter 24-bit (3-byte) packing to reduce bandwidth (I12|Q12) – trade complexity
-- Explore vendor RAW class endpoint for marginal gains over CDC ACM
+- Maintain or push beyond 220 kS/s (USB packing & endpoint tuning)
+- Optional tighter 24-bit (3-byte) packing (I12|Q12) – reduces bandwidth ~25%
+- Vendor RAW class endpoint for marginal gains over CDC ACM
 - Lightweight CRC / sequence tags for host-side drop detection
 - Optional AGC / scaling in firmware (convert to centered 16-bit signed)
-- Continuous integration tests for host scripts (lint / basic functional mocks)
+- Continuous integration tests for host scripts
+- IQ gain/phase auto-calibration
+- Expanded PhaseLatch Mini variants (higher‑resolution MCUs, external HS USB)
 
----
 ## License
 
 (Choose and add a SPDX license header & file as appropriate, e.g. MIT or Apache-2.0.)
