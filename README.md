@@ -335,3 +335,30 @@ Interpretation updates:
 Developed as an incremental exploration of practical FS USB throughput & latency reduction techniques on resource-constrained MCUs while streaming synchronous dual-ADC data.
 
 Contributions / suggestions welcome.
+
+## Getting a PCB
+
+## Production & Manufacturing
+- The `hardware/production/` folder includes all needed files. 
+
+This project is kindly sponsored by JLCPCB. They offer cheap, professional looking PCBs and super fast delivery.
+
+Step 1: Get the gerber file zip package from the /hardware folder
+
+Step 2: Upload to JLCPCB [https://jlcpcb.com/?from=Anders_N](https://jlcpcb.com/?from=Anders_N)
+
+<img src="https://github.com/AndersBNielsen/65uino/blob/main/images/upload.png?raw=true" alt="Upload" style="width: 220px;">
+
+Step 3: Pick your color, surface finish and order.
+
+<img src="https://github.com/AndersBNielsen/65uino/blob/main/images/settings.png?raw=true" alt="Select settings" style="width: 220px;">
+
+<img src="https://github.com/AndersBNielsen/65uino/blob/main/images/save.png?raw=true" alt="Save your choice" style="width: 220px;">
+
+
+You can use these affiliate links to get a board for $2 and also get $54 worth of New User Coupons at: https://jlcpcb.com/?from=Anders_N
+
+And in case you also want to order a 3D-printed case you can use this link. 
+How to Get a $7 3D Printing Coupon: [https://3d.jlcpcb.com/?from=Anders3DP](https://jlc3dp.com/?from=Anders_N)
+
+
